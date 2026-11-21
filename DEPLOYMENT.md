@@ -12,7 +12,7 @@ This guide documents the architecture, environment configuration, Firebase setup
 - **Backend API Server (`server.ts`)**: Express + Vite middleware running on port `3000`:
   - `/api/health` — Server and AI configuration readiness check.
   - `/api/ingest/validate` & `/api/ingest/fetch` — Server-side RSS/Atom (`rss-parser`) and authorized JSON API ingestion with DNS/IP SSRF protection, redirect validation, URL canonicalization, SHA-256 deduplication, and copyright-compliant excerpt enforcement.
-  - `/api/ai/*` — Interchangeable server-side `AIProvider` (`GeminiAIProvider` powered by `@google/genai` on `gemini-4-hydrogen`) providing article summarization, keyword/category extraction, EN/BN/HI translation (preserving original source text), multi-source comparison, source-grounded Q&A, timeline synthesis, and natural language search parsing.
+  - `/api/ai/*` — 100% Open-Source server-side `AIProvider` supporting the built-in zero-key **Open-Source Local NLP Engine** (extractive TF-IDF summarization, lexical comparison, verbatim grounded Q&A, chronology synthesis, and natural-language query parsing), **Ollama** (`llama3.2`, `qwen2.5`, `mistral`), **Hugging Face Inference Router** (open-weights models like `meta-llama/Llama-3.3-70B-Instruct`), any **vLLM / llama.cpp** OpenAI-compatible server, and optional **LibreTranslate** for neural translation.
   - `/sitemap.xml` & `/robots.txt` — Dynamic crawler directives and XML sitemap.
 - **Database & Auth**: Cloud Firestore (17 structured collections defined in `firebase-blueprint.json`) + Firebase Authentication (Google Sign-In + Email/Password + password reset).
 - **Scheduled Cloud Functions (`functions/src/index.ts`)**: Firebase Cloud Functions v2 scheduled RSS collector (`scheduledInformationCollector`) and editorial audit trigger (`onArticlePublishedAudit`).
@@ -25,7 +25,11 @@ Copy `.env.example` to `.env` for local or external deployments:
 
 | Variable | Required | Scope | Purpose |
 | :--- | :---: | :--- | :--- |
-| `GEMINI_API_KEY` | Yes (for AI routes) | Server only | Authenticates server-side `@google/genai` requests. Never exposed to the browser. |
+| `AI_PROVIDER` | Optional | Server only | Open-source AI mode: `auto` (default), `local`, `ollama`, `huggingface`, or `openai_compatible`. |
+| `OLLAMA_BASE_URL` | Optional | Server only | Self-hosted Ollama OpenAI-compatible URL (e.g., `http://127.0.0.1:11434/v1`). |
+| `HF_TOKEN` | Optional | Server only | Hugging Face token for open-weight models on `router.huggingface.co/v1`. |
+| `OPENSOURCE_AI_BASE_URL` / `OPENSOURCE_AI_MODEL` / `OPENSOURCE_AI_API_KEY` | Optional | Server only | Any vLLM, llama.cpp, LocalAI, or open-weights OpenAI-compatible endpoint. |
+| `LIBRETRANSLATE_URL` / `LIBRETRANSLATE_API_KEY` | Optional | Server only | Self-hosted open-source LibreTranslate instance for multilingual translation. |
 | `APP_URL` | Recommended | Server | Base URL used in `/sitemap.xml` and `/robots.txt`. |
 | `NODE_ENV` | Optional | Server | Set to `production` to serve built `dist/` assets. |
 | `PORT` | Optional | Server | Defaults to `3000`. |

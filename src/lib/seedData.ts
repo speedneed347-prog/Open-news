@@ -752,5 +752,5 @@ export const DEFAULT_SITE_SETTINGS: Omit<SiteSettings, 'updatedAt'> = {
   seoDefaultTitle: 'ALL INFORMATION HUB — All Information. One Intelligent Platform.',
   seoDefaultDescription:
     'Global digital news portal, multi-source RSS/API aggregator, research library, fact-check center, and AI-powered knowledge discovery platform.',
-  aiProviderName: 'Gemini (gemini-4-hydrogen)',
+  aiProviderName: 'Open-Source AI (Ollama / Hugging Face / Local NLP)',
 };

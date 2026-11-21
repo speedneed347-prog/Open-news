@@ -650,12 +650,14 @@ export function ArticleDetailPage({ slug }: { slug: string }) {
                 disabled={loadingAnalysis}
                 className="w-full py-2 px-3 text-xs font-semibold bg-[#1E3A8A] text-white dark:bg-[#60A5FA] dark:text-[#0C0F14] hover:opacity-90 disabled:opacity-50 cursor-pointer"
               >
-                {loadingAnalysis ? 'Analyzing with Gemini...' : 'Generate AI Brief & Keywords'}
+                {loadingAnalysis ? 'Analyzing with Open-Source AI...' : 'Generate AI Brief & Keywords'}
               </button>
 
               {aiAnalysis && (
                 <div className="pt-3 border-t border-[#E5E2DC] dark:border-[#232A36] space-y-3 text-xs">
-                  <p className="text-[11px] italic text-[#78716C]">{aiAnalysis.aiLabel}</p>
+                  <p className="text-[11px] italic text-[#78716C]">
+                    {aiAnalysis.aiLabel} · Engine: {aiAnalysis.provider}
+                  </p>
                   <p className="text-[#141413] dark:text-[#E5E7EB] leading-relaxed">
                     {aiAnalysis.summary}
                   </p>
