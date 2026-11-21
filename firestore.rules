@@ -1,0 +1,786 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // GLOBAL PRIMITIVES & IDENTITY HELPERS
+    // =========================================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidSlug(slug) {
+      return slug is string && slug.size() >= 1 && slug.size() <= 200 && slug.matches('^[a-z0-9\\-]+$');
+    }
+
+    function isValidShortString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isOptionalString(data, key, maxLen) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function isOptionalStringArray(data, key, maxItems) {
+      return !(key in data) || (
+        data[key] is list &&
+        data[key].size() <= maxItems &&
+        (data[key].size() == 0 || (data[key][0] is string && data[key][0].size() <= 200))
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isBootstrapAdmin() {
+      return isVerified() && request.auth.token.email == 'manojitmi72@gmail.com';
+    }
+
+    function hasActiveAdminRole(allowedRoles) {
+      return isVerified() &&
+        exists(/databases/$(database)/documents/admin_roles/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admin_roles/$(request.auth.uid)).data.active == true &&
+        get(/databases/$(database)/documents/admin_roles/$(request.auth.uid)).data.role in allowedRoles;
+    }
+
+    function isAdmin() {
+      return isBootstrapAdmin() || hasActiveAdminRole(['super_admin', 'administrator']);
+    }
+
+    function isEditorialStaff() {
+      return isBootstrapAdmin() || hasActiveAdminRole(['super_admin', 'administrator', 'editor', 'author', 'reviewer']);
+    }
+
+    function isSourceManager() {
+      return isBootstrapAdmin() || hasActiveAdminRole(['super_admin', 'administrator', 'source_manager', 'editor']);
+    }
+
+    function isFactChecker() {
+      return isBootstrapAdmin() || hasActiveAdminRole(['super_admin', 'administrator', 'editor', 'reviewer']);
+    }
+
+    function isAnyStaff() {
+      return isBootstrapAdmin() || hasActiveAdminRole(['super_admin', 'administrator', 'editor', 'author', 'reviewer', 'source_manager']);
+    }
+
+    // =========================================================================
+    // VALIDATION BLUEPRINTS
+    // =========================================================================
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'preferredLanguage', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'photoURL', 'bio', 'role', 'preferredLanguage',
+          'followedCategories', 'followedTopics', 'followedPublishers', 'notificationPrefs',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        data.uid == userId &&
+        isValidShortString(data.email, 3, 254) &&
+        isValidShortString(data.displayName, 1, 120) &&
+        isOptionalString(data, 'photoURL', 500) &&
+        isOptionalString(data, 'bio', 500) &&
+        data.role in ['reader', 'author', 'reviewer', 'editor', 'source_manager', 'administrator', 'super_admin'] &&
+        isValidShortString(data.preferredLanguage, 2, 10) &&
+        isOptionalStringArray(data, 'followedCategories', 50) &&
+        isOptionalStringArray(data, 'followedTopics', 50) &&
+        isOptionalStringArray(data, 'followedPublishers', 50) &&
+        (!('notificationPrefs' in data) || data.notificationPrefs is map) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdminRole(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'assignedBy', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'assignedBy', 'active', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.uid == userId &&
+        isValidShortString(data.email, 3, 254) &&
+        data.role in ['super_admin', 'administrator', 'editor', 'author', 'reviewer', 'source_manager'] &&
+        isValidId(data.assignedBy) &&
+        data.active is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasAll(['name', 'slug', 'description', 'displayOrder', 'isActive', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'name', 'slug', 'description', 'parentId', 'icon', 'imageUrl',
+          'displayOrder', 'isActive', 'tags', 'allowedContentTypes', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidShortString(data.name, 1, 100) &&
+        isValidSlug(data.slug) &&
+        isValidShortString(data.description, 0, 600) &&
+        isOptionalString(data, 'parentId', 128) &&
+        isOptionalString(data, 'icon', 60) &&
+        isOptionalString(data, 'imageUrl', 600) &&
+        data.displayOrder is number &&
+        data.isActive is bool &&
+        isOptionalStringArray(data, 'tags', 20) &&
+        isOptionalStringArray(data, 'allowedContentTypes', 20) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidArticle(data) {
+      return data.keys().hasAll([
+          'title', 'slug', 'summary', 'content', 'contentType', 'originalSource',
+          'authorName', 'authorUid', 'categoryId', 'country', 'language',
+          'collectionMethod', 'copyrightPermissionStatus', 'editorialStatus',
+          'factCheckStatus', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'title', 'slug', 'subtitle', 'summary', 'content', 'contentType',
+          'originalSource', 'originalSourceUrl', 'canonicalUrl', 'authorName', 'authorUid',
+          'categoryId', 'subcategoryId', 'tags', 'topics', 'country', 'language',
+          'featuredImage', 'attachments', 'publishedAt', 'collectedAt', 'scheduledAt',
+          'collectionMethod', 'copyrightPermissionStatus', 'editorialStatus', 'factCheckStatus',
+          'isBreaking', 'isFeatured', 'isSampleData', 'viewCount',
+          'aiSummary', 'aiKeywords', 'aiProcessed', 'sourceId',
+          'seoTitle', 'seoDescription', 'relatedArticleIds', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidShortString(data.title, 3, 300) &&
+        isValidSlug(data.slug) &&
+        isOptionalString(data, 'subtitle', 400) &&
+        isValidShortString(data.summary, 5, 2000) &&
+        isValidShortString(data.content, 10, 120000) &&
+        data.contentType in [
+          'news', 'article', 'research', 'educational_note', 'government_notification',
+          'historical_document', 'report', 'editorial', 'opinion', 'scientific_discovery',
+          'statistical_info', 'pdf_document', 'image_gallery', 'video_content', 'special_collection'
+        ] &&
+        isValidShortString(data.originalSource, 1, 160) &&
+        isOptionalString(data, 'originalSourceUrl', 1000) &&
+        isOptionalString(data, 'canonicalUrl', 1000) &&
+        isValidShortString(data.authorName, 1, 140) &&
+        isValidId(data.authorUid) &&
+        isValidId(data.categoryId) &&
+        isOptionalString(data, 'subcategoryId', 128) &&
+        isOptionalStringArray(data, 'tags', 20) &&
+        isOptionalStringArray(data, 'topics', 15) &&
+        isValidShortString(data.country, 2, 80) &&
+        isValidShortString(data.language, 2, 16) &&
+        isOptionalString(data, 'featuredImage', 1000) &&
+        (!('attachments' in data) || (data.attachments is list && data.attachments.size() <= 15)) &&
+        isOptionalString(data, 'publishedAt', 64) &&
+        isOptionalString(data, 'collectedAt', 64) &&
+        isOptionalString(data, 'scheduledAt', 64) &&
+        data.collectionMethod in ['manual', 'rss', 'api', 'government_feed', 'research_feed'] &&
+        data.copyrightPermissionStatus in ['original', 'full_licensed', 'excerpt_and_link', 'public_domain', 'cc_licensed'] &&
+        data.editorialStatus in ['draft', 'pending_review', 'needs_correction', 'scheduled', 'published', 'rejected', 'archived'] &&
+        data.factCheckStatus in ['verified', 'partially_verified', 'unverified', 'disputed', 'false', 'under_review'] &&
+        (!('isBreaking' in data) || data.isBreaking is bool) &&
+        (!('isFeatured' in data) || data.isFeatured is bool) &&
+        (!('isSampleData' in data) || data.isSampleData is bool) &&
+        (!('viewCount' in data) || (data.viewCount is number && data.viewCount >= 0)) &&
+        isOptionalString(data, 'aiSummary', 2000) &&
+        isOptionalStringArray(data, 'aiKeywords', 20) &&
+        (!('aiProcessed' in data) || data.aiProcessed is bool) &&
+        isOptionalString(data, 'sourceId', 128) &&
+        isOptionalString(data, 'seoTitle', 160) &&
+        isOptionalString(data, 'seoDescription', 320) &&
+        isOptionalStringArray(data, 'relatedArticleIds', 15) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidArticleVersion(data, articleId) {
+      return data.keys().hasAll(['articleId', 'versionNumber', 'title', 'editorUid', 'editorName', 'createdAt']) &&
+        data.keys().hasOnly(['articleId', 'versionNumber', 'title', 'summary', 'content', 'editorUid', 'editorName', 'changeNote', 'editorialStatus', 'createdAt']) &&
+        data.articleId == articleId &&
+        data.versionNumber is number && data.versionNumber >= 1 &&
+        isValidShortString(data.title, 1, 300) &&
+        isOptionalString(data, 'summary', 2000) &&
+        isOptionalString(data, 'content', 120000) &&
+        data.editorUid == request.auth.uid &&
+        isValidShortString(data.editorName, 1, 120) &&
+        isOptionalString(data, 'changeNote', 400) &&
+        isOptionalString(data, 'editorialStatus', 40) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidPublisher(data) {
+      return data.keys().hasAll(['name', 'slug', 'websiteUrl', 'country', 'language', 'trustClassification', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['name', 'slug', 'websiteUrl', 'country', 'language', 'publisherType', 'trustClassification', 'description', 'createdAt', 'updatedAt']) &&
+        isValidShortString(data.name, 1, 160) &&
+        isValidSlug(data.slug) &&
+        isValidShortString(data.websiteUrl, 4, 500) &&
+        isValidShortString(data.country, 2, 80) &&
+        isValidShortString(data.language, 2, 16) &&
+        isOptionalString(data, 'publisherType', 60) &&
+        data.trustClassification in ['official_government', 'peer_reviewed', 'major_newsroom', 'verified_independent', 'standard'] &&
+        isOptionalString(data, 'description', 800) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSource(data) {
+      return data.keys().hasAll([
+          'name', 'websiteUrl', 'sourceType', 'country', 'language',
+          'fetchIntervalMinutes', 'status', 'trustClassification',
+          'contentPermission', 'autoPublishEligible', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'websiteUrl', 'sourceType', 'country', 'language',
+          'rssFeedUrl', 'apiEndpoint', 'authMode', 'fetchIntervalMinutes',
+          'status', 'trustClassification', 'contentPermission', 'autoPublishEligible',
+          'defaultCategoryId', 'lastFetchTime', 'nextFetchTime', 'errorStatus',
+          'totalImported', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidShortString(data.name, 1, 160) &&
+        isValidShortString(data.websiteUrl, 4, 500) &&
+        data.sourceType in [
+          'rss_feed', 'news_publisher', 'newspaper_website', 'news_channel',
+          'government_portal', 'educational_institution', 'research_journal',
+          'press_release', 'authorized_api', 'custom_feed'
+        ] &&
+        isValidShortString(data.country, 2, 80) &&
+        isValidShortString(data.language, 2, 16) &&
+        isOptionalString(data, 'rssFeedUrl', 1000) &&
+        isOptionalString(data, 'apiEndpoint', 1000) &&
+        (!('authMode' in data) || data.authMode in ['none', 'server_env_header', 'server_env_query']) &&
+        data.fetchIntervalMinutes is number && data.fetchIntervalMinutes >= 5 && data.fetchIntervalMinutes <= 10080 &&
+        data.status in ['active', 'paused', 'error'] &&
+        data.trustClassification in ['tier_1_official', 'tier_1_journal', 'tier_2_major_media', 'tier_3_verified', 'unclassified'] &&
+        data.contentPermission in ['excerpt_and_link', 'full_authorized', 'public_domain', 'cc_by'] &&
+        data.autoPublishEligible is bool &&
+        isOptionalString(data, 'defaultCategoryId', 128) &&
+        isOptionalString(data, 'lastFetchTime', 64) &&
+        isOptionalString(data, 'nextFetchTime', 64) &&
+        isOptionalString(data, 'errorStatus', 500) &&
+        (!('totalImported' in data) || (data.totalImported is number && data.totalImported >= 0)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidIngestionLog(data) {
+      return data.keys().hasAll(['sourceId', 'sourceName', 'triggeredByUid', 'status', 'itemsFetched', 'itemsImported', 'duplicatesSkipped', 'createdAt']) &&
+        data.keys().hasOnly(['sourceId', 'sourceName', 'triggeredByUid', 'status', 'itemsFetched', 'itemsImported', 'duplicatesSkipped', 'errorMessage', 'createdAt']) &&
+        isValidId(data.sourceId) &&
+        isValidShortString(data.sourceName, 1, 160) &&
+        data.triggeredByUid == request.auth.uid &&
+        data.status in ['success', 'partial', 'failed'] &&
+        data.itemsFetched is number && data.itemsFetched >= 0 &&
+        data.itemsImported is number && data.itemsImported >= 0 &&
+        data.duplicatesSkipped is number && data.duplicatesSkipped >= 0 &&
+        isOptionalString(data, 'errorMessage', 1000) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidFactCheck(data) {
+      return data.keys().hasAll(['claim', 'status', 'evidence', 'explanation', 'reviewerName', 'reviewerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['claim', 'status', 'evidence', 'explanation', 'methodology', 'references', 'reviewerName', 'reviewerUid', 'articleId', 'category', 'isSampleData', 'createdAt', 'updatedAt']) &&
+        isValidShortString(data.claim, 5, 600) &&
+        data.status in ['verified', 'partially_verified', 'unverified', 'disputed', 'false', 'under_review'] &&
+        isValidShortString(data.evidence, 5, 4000) &&
+        isValidShortString(data.explanation, 5, 4000) &&
+        isOptionalString(data, 'methodology', 1000) &&
+        isOptionalStringArray(data, 'references', 20) &&
+        isValidShortString(data.reviewerName, 1, 140) &&
+        isValidId(data.reviewerUid) &&
+        isOptionalString(data, 'articleId', 128) &&
+        isOptionalString(data, 'category', 100) &&
+        (!('isSampleData' in data) || data.isSampleData is bool) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidTimeline(data) {
+      return data.keys().hasAll(['title', 'slug', 'topic', 'summary', 'events', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['title', 'slug', 'topic', 'summary', 'events', 'isSampleData', 'createdAt', 'updatedAt']) &&
+        isValidShortString(data.title, 3, 200) &&
+        isValidSlug(data.slug) &&
+        isValidShortString(data.topic, 2, 100) &&
+        isValidShortString(data.summary, 0, 1000) &&
+        data.events is list && data.events.size() <= 50 &&
+        (!('isSampleData' in data) || data.isSampleData is bool) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBookmark(data, userId) {
+      return data.keys().hasAll(['userId', 'articleId', 'articleTitle', 'articleSlug', 'createdAt']) &&
+        data.keys().hasOnly(['userId', 'articleId', 'articleTitle', 'articleSlug', 'categoryId', 'createdAt']) &&
+        data.userId == userId &&
+        data.userId == request.auth.uid &&
+        isValidId(data.articleId) &&
+        isValidShortString(data.articleTitle, 1, 300) &&
+        isValidSlug(data.articleSlug) &&
+        isOptionalString(data, 'categoryId', 128) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidReadingHistory(data, userId) {
+      return data.keys().hasAll(['userId', 'articleId', 'articleTitle', 'articleSlug', 'progressPercent', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['userId', 'articleId', 'articleTitle', 'articleSlug', 'progressPercent', 'createdAt', 'updatedAt']) &&
+        data.userId == userId &&
+        data.userId == request.auth.uid &&
+        isValidId(data.articleId) &&
+        isValidShortString(data.articleTitle, 1, 300) &&
+        isValidSlug(data.articleSlug) &&
+        data.progressPercent is number && data.progressPercent >= 0 && data.progressPercent <= 100 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidReadingList(data, userId) {
+      return data.keys().hasAll(['userId', 'name', 'articleIds', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['userId', 'name', 'description', 'articleIds', 'createdAt', 'updatedAt']) &&
+        data.userId == userId &&
+        data.userId == request.auth.uid &&
+        isValidShortString(data.name, 1, 120) &&
+        isOptionalString(data, 'description', 400) &&
+        isOptionalStringArray(data, 'articleIds', 50) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSavedSearch(data, userId) {
+      return data.keys().hasAll(['userId', 'query', 'createdAt']) &&
+        data.keys().hasOnly(['userId', 'query', 'category', 'language', 'createdAt']) &&
+        data.userId == userId &&
+        data.userId == request.auth.uid &&
+        isValidShortString(data.query, 1, 200) &&
+        isOptionalString(data, 'category', 100) &&
+        isOptionalString(data, 'language', 20) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidComment(data, articleId) {
+      return data.keys().hasAll(['articleId', 'authorUid', 'authorName', 'body', 'createdAt']) &&
+        data.keys().hasOnly(['articleId', 'authorUid', 'authorName', 'body', 'createdAt']) &&
+        data.articleId == articleId &&
+        data.authorUid == request.auth.uid &&
+        isValidShortString(data.authorName, 1, 120) &&
+        isValidShortString(data.body, 2, 2000) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['actorUid', 'actorEmail', 'actorRole', 'action', 'targetType', 'targetId', 'createdAt']) &&
+        data.keys().hasOnly(['actorUid', 'actorEmail', 'actorRole', 'action', 'targetType', 'targetId', 'details', 'createdAt']) &&
+        data.actorUid == request.auth.uid &&
+        isValidShortString(data.actorEmail, 3, 254) &&
+        isValidShortString(data.actorRole, 2, 60) &&
+        isValidShortString(data.action, 2, 120) &&
+        isValidShortString(data.targetType, 2, 80) &&
+        isValidShortString(data.targetId, 1, 128) &&
+        isOptionalString(data, 'details', 1000) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSiteSetting(data) {
+      return data.keys().hasAll(['siteName', 'defaultRequireApproval', 'enabledLanguages', 'breakingTickerEnabled', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'siteName', 'tagline', 'defaultRequireApproval', 'enabledLanguages',
+          'breakingTickerEnabled', 'seoDefaultTitle', 'seoDefaultDescription',
+          'aiProviderName', 'updatedAt'
+        ]) &&
+        isValidShortString(data.siteName, 1, 120) &&
+        isOptionalString(data, 'tagline', 240) &&
+        data.defaultRequireApproval is bool &&
+        isOptionalStringArray(data, 'enabledLanguages', 20) &&
+        data.breakingTickerEnabled is bool &&
+        isOptionalString(data, 'seoDefaultTitle', 160) &&
+        isOptionalString(data, 'seoDefaultDescription', 320) &&
+        isOptionalString(data, 'aiProviderName', 60) &&
+        data.updatedAt is timestamp;
+    }
+
+    // =========================================================================
+    // COLLECTION RULES
+    // =========================================================================
+
+    // Connection test probe
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // 1. Users (PII-Isolated)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isBootstrapAdmin();
+      allow create: if isVerified() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (
+          (isOwner(userId) && incoming().role == 'reader' && incoming().email == request.auth.token.email) ||
+          isAdmin()
+        );
+      allow update: if isVerified() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (
+            isOwner(userId) &&
+            incoming().role == existing().role &&
+            incoming().email == existing().email &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'photoURL', 'bio', 'preferredLanguage',
+              'followedCategories', 'followedTopics', 'followedPublishers',
+              'notificationPrefs', 'updatedAt'
+            ])
+          ) ||
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['role', 'displayName', 'bio', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+
+      // User Subcollections (Strictly Owner-Isolated)
+      match /bookmarks/{bookmarkId} {
+        allow get: if isValidId(userId) && isValidId(bookmarkId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerified() &&
+          isValidId(userId) && isValidId(bookmarkId) &&
+          isOwner(userId) &&
+          isValidBookmark(incoming(), userId) &&
+          incoming().createdAt == request.time;
+        allow delete: if isVerified() && isValidId(userId) && isValidId(bookmarkId) && isOwner(userId);
+      }
+
+      match /reading_history/{historyId} {
+        allow get: if isValidId(userId) && isValidId(historyId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerified() &&
+          isValidId(userId) && isValidId(historyId) &&
+          isOwner(userId) &&
+          isValidReadingHistory(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time;
+        allow update: if isVerified() &&
+          isValidId(userId) && isValidId(historyId) &&
+          isOwner(userId) &&
+          isValidReadingHistory(incoming(), userId) &&
+          incoming().userId == existing().userId &&
+          incoming().articleId == existing().articleId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['progressPercent', 'articleTitle', 'updatedAt']);
+        allow delete: if isVerified() && isValidId(userId) && isValidId(historyId) && isOwner(userId);
+      }
+
+      match /reading_lists/{listId} {
+        allow get: if isValidId(userId) && isValidId(listId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerified() &&
+          isValidId(userId) && isValidId(listId) &&
+          isOwner(userId) &&
+          isValidReadingList(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time;
+        allow update: if isVerified() &&
+          isValidId(userId) && isValidId(listId) &&
+          isOwner(userId) &&
+          isValidReadingList(incoming(), userId) &&
+          incoming().userId == existing().userId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'articleIds', 'updatedAt']);
+        allow delete: if isVerified() && isValidId(userId) && isValidId(listId) && isOwner(userId);
+      }
+
+      match /saved_searches/{searchId} {
+        allow get: if isValidId(userId) && isValidId(searchId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isVerified() &&
+          isValidId(userId) && isValidId(searchId) &&
+          isOwner(userId) &&
+          isValidSavedSearch(incoming(), userId) &&
+          incoming().createdAt == request.time;
+        allow delete: if isVerified() && isValidId(userId) && isValidId(searchId) && isOwner(userId);
+      }
+    }
+
+    // 2. Admin Roles (RBAC Registry)
+    match /admin_roles/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isBootstrapAdmin();
+      allow create: if isVerified() &&
+        isValidId(userId) &&
+        isValidAdminRole(incoming(), userId) &&
+        incoming().assignedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isVerified() &&
+        isValidId(userId) &&
+        isValidAdminRole(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['role', 'active', 'assignedBy', 'updatedAt']) &&
+        isAdmin();
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // 3. Dynamic Categories & Nested Subcategories
+    match /categories/{categoryId} {
+      allow get: if isValidId(categoryId);
+      allow list: if resource.data.isActive == true || isBootstrapAdmin();
+      allow create: if isVerified() &&
+        isValidId(categoryId) &&
+        isValidCategory(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isEditorialStaff();
+      allow update: if isVerified() &&
+        isValidId(categoryId) &&
+        isValidCategory(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'slug', 'description', 'parentId', 'icon', 'imageUrl',
+          'displayOrder', 'isActive', 'tags', 'allowedContentTypes', 'updatedAt'
+        ]) &&
+        isEditorialStaff();
+      allow delete: if isValidId(categoryId) && isAdmin();
+    }
+
+    // 4. Central Articles Database
+    match /articles/{articleId} {
+      allow get: if isValidId(articleId) && (existing().editorialStatus == 'published' || isAnyStaff());
+      allow list: if resource.data.editorialStatus == 'published' || isBootstrapAdmin() || (isSignedIn() && resource.data.authorUid == request.auth.uid);
+      allow create: if isVerified() &&
+        isValidId(articleId) &&
+        isValidArticle(incoming()) &&
+        incoming().authorUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAnyStaff();
+      allow update: if isVerified() &&
+        isValidId(articleId) &&
+        isValidArticle(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().editorialStatus != 'archived' || isAdmin()) &&
+        (
+          (
+            isEditorialStaff() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'slug', 'subtitle', 'summary', 'content', 'contentType',
+              'originalSource', 'originalSourceUrl', 'canonicalUrl', 'authorName',
+              'categoryId', 'subcategoryId', 'tags', 'topics', 'country', 'language',
+              'featuredImage', 'attachments', 'publishedAt', 'scheduledAt',
+              'copyrightPermissionStatus', 'editorialStatus', 'factCheckStatus',
+              'isBreaking', 'isFeatured', 'aiSummary', 'aiKeywords', 'aiProcessed',
+              'seoTitle', 'seoDescription', 'relatedArticleIds', 'updatedAt'
+            ])
+          ) ||
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'slug', 'subtitle', 'summary', 'content', 'contentType',
+              'originalSource', 'originalSourceUrl', 'canonicalUrl', 'authorName',
+              'categoryId', 'subcategoryId', 'tags', 'topics', 'country', 'language',
+              'featuredImage', 'attachments', 'publishedAt', 'scheduledAt',
+              'copyrightPermissionStatus', 'editorialStatus', 'factCheckStatus',
+              'isBreaking', 'isFeatured', 'isSampleData', 'viewCount',
+              'aiSummary', 'aiKeywords', 'aiProcessed', 'seoTitle', 'seoDescription',
+              'relatedArticleIds', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(articleId) && isAdmin();
+
+      // 4a. Editorial Revision History (Master Gate + Append-Only)
+      match /versions/{versionId} {
+        allow get: if isValidId(articleId) && isValidId(versionId) && isEditorialStaff();
+        allow list: if isBootstrapAdmin() || (isSignedIn() && resource.data.editorUid == request.auth.uid);
+        allow create: if isVerified() &&
+          isValidId(articleId) && isValidId(versionId) &&
+          isValidArticleVersion(incoming(), articleId) &&
+          incoming().createdAt == request.time &&
+          exists(/databases/$(database)/documents/articles/$(articleId)) &&
+          isEditorialStaff();
+        allow update, delete: if false;
+      }
+
+      // 4b. Reader Comments (Master Gate on Published Articles)
+      match /comments/{commentId} {
+        allow get: if isValidId(articleId) && isValidId(commentId);
+        allow list: if resource.data.articleId == articleId;
+        allow create: if isVerified() &&
+          isValidId(articleId) && isValidId(commentId) &&
+          isValidComment(incoming(), articleId) &&
+          incoming().createdAt == request.time &&
+          exists(/databases/$(database)/documents/articles/$(articleId)) &&
+          get(/databases/$(database)/documents/articles/$(articleId)).data.editorialStatus == 'published';
+        allow update: if false;
+        allow delete: if isVerified() && isValidId(articleId) && isValidId(commentId) &&
+          (existing().authorUid == request.auth.uid || isEditorialStaff());
+      }
+    }
+
+    // 5. Publisher Directory
+    match /publishers/{publisherId} {
+      allow get: if isValidId(publisherId);
+      allow list: if request.query.limit <= 200;
+      allow create: if isVerified() &&
+        isValidId(publisherId) &&
+        isValidPublisher(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isSourceManager();
+      allow update: if isVerified() &&
+        isValidId(publisherId) &&
+        isValidPublisher(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'slug', 'websiteUrl', 'country', 'language',
+          'publisherType', 'trustClassification', 'description', 'updatedAt'
+        ]) &&
+        isSourceManager();
+      allow delete: if isValidId(publisherId) && isAdmin();
+    }
+
+    // 6. Automatic Collection Sources
+    match /sources/{sourceId} {
+      allow get: if isValidId(sourceId);
+      allow list: if request.query.limit <= 200;
+      allow create: if isVerified() &&
+        isValidId(sourceId) &&
+        isValidSource(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isSourceManager();
+      allow update: if isVerified() &&
+        isValidId(sourceId) &&
+        isValidSource(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'websiteUrl', 'sourceType', 'country', 'language',
+          'rssFeedUrl', 'apiEndpoint', 'authMode', 'fetchIntervalMinutes',
+          'status', 'trustClassification', 'contentPermission', 'autoPublishEligible',
+          'defaultCategoryId', 'lastFetchTime', 'nextFetchTime', 'errorStatus',
+          'totalImported', 'updatedAt'
+        ]) &&
+        isSourceManager();
+      allow delete: if isValidId(sourceId) && isAdmin();
+    }
+
+    // 7. Ingestion Logs (Append-Only for Staff)
+    match /ingestion_logs/{logId} {
+      allow get: if isValidId(logId) && isAnyStaff();
+      allow list: if isBootstrapAdmin() || (isSignedIn() && resource.data.triggeredByUid == request.auth.uid);
+      allow create: if isVerified() &&
+        isValidId(logId) &&
+        isValidIngestionLog(incoming()) &&
+        incoming().createdAt == request.time &&
+        isSourceManager();
+      allow update, delete: if false;
+    }
+
+    // 8. Fact Check Records
+    match /fact_checks/{factCheckId} {
+      allow get: if isValidId(factCheckId);
+      allow list: if request.query.limit <= 200;
+      allow create: if isVerified() &&
+        isValidId(factCheckId) &&
+        isValidFactCheck(incoming()) &&
+        incoming().reviewerUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isFactChecker();
+      allow update: if isVerified() &&
+        isValidId(factCheckId) &&
+        isValidFactCheck(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'claim', 'status', 'evidence', 'explanation', 'methodology',
+          'references', 'reviewerName', 'reviewerUid', 'articleId', 'category', 'updatedAt'
+        ]) &&
+        isFactChecker();
+      allow delete: if isValidId(factCheckId) && isAdmin();
+    }
+
+    // 9. Event & Topic Timelines
+    match /timelines/{timelineId} {
+      allow get: if isValidId(timelineId);
+      allow list: if request.query.limit <= 200;
+      allow create: if isVerified() &&
+        isValidId(timelineId) &&
+        isValidTimeline(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isEditorialStaff();
+      allow update: if isVerified() &&
+        isValidId(timelineId) &&
+        isValidTimeline(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'slug', 'topic', 'summary', 'events', 'updatedAt'
+        ]) &&
+        isEditorialStaff();
+      allow delete: if isValidId(timelineId) && isAdmin();
+    }
+
+    // 10. Administrative Audit Logs (Strictly Append-Only)
+    match /audit_logs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isBootstrapAdmin() || (isSignedIn() && resource.data.actorUid == request.auth.uid);
+      allow create: if isVerified() &&
+        isValidId(logId) &&
+        isValidAuditLog(incoming()) &&
+        incoming().createdAt == request.time &&
+        isAnyStaff();
+      allow update, delete: if false;
+    }
+
+    // 11. Site Settings
+    match /site_settings/{settingId} {
+      allow get: if isValidId(settingId) && (settingId == 'public' || isAdmin());
+      allow list: if isBootstrapAdmin();
+      allow create: if isVerified() &&
+        isValidId(settingId) &&
+        isValidSiteSetting(incoming()) &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isVerified() &&
+        isValidId(settingId) &&
+        isValidSiteSetting(incoming()) &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'siteName', 'tagline', 'defaultRequireApproval', 'enabledLanguages',
+          'breakingTickerEnabled', 'seoDefaultTitle', 'seoDefaultDescription',
+          'aiProviderName', 'updatedAt'
+        ]) &&
+        isAdmin();
+      allow delete: if false;
+    }
+  }
+}

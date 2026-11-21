@@ -1,0 +1,396 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private user account profile, reading preferences, and notification controls.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "bio": { "type": "string", "maxLength": 500 },
+        "role": { "type": "string", "enum": ["reader", "author", "reviewer", "editor", "source_manager", "administrator", "super_admin"] },
+        "preferredLanguage": { "type": "string", "minLength": 2, "maxLength": 10 },
+        "followedCategories": { "type": "array", "description": "Up to 50 followed category IDs" },
+        "followedTopics": { "type": "array", "description": "Up to 50 followed topic names" },
+        "followedPublishers": { "type": "array", "description": "Up to 50 followed publisher IDs" },
+        "notificationPrefs": { "type": "object", "description": "Granular notification toggles" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "preferredLanguage", "createdAt", "updatedAt"]
+    },
+    "AdminRole": {
+      "title": "AdminRole",
+      "description": "Role-based access control assignment document keyed by user UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "role": { "type": "string", "enum": ["super_admin", "administrator", "editor", "author", "reviewer", "source_manager"] },
+        "assignedBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "assignedBy", "active", "createdAt", "updatedAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Dynamic database-driven category or nested subcategory.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "slug": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "^[a-z0-9\\-]+$" },
+        "description": { "type": "string", "maxLength": 600 },
+        "parentId": { "type": "string", "maxLength": 128 },
+        "icon": { "type": "string", "maxLength": 60 },
+        "imageUrl": { "type": "string", "maxLength": 600 },
+        "displayOrder": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "tags": { "type": "array", "description": "Up to 20 category tags" },
+        "allowedContentTypes": { "type": "array", "description": "Up to 20 allowed content types" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "slug", "description", "displayOrder", "isActive", "createdAt", "updatedAt"]
+    },
+    "Article": {
+      "title": "Article",
+      "description": "Central content entity for manual and automatically collected news, research, notices, and reports.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 3, "maxLength": 300 },
+        "slug": { "type": "string", "minLength": 2, "maxLength": 200, "pattern": "^[a-z0-9\\-]+$" },
+        "subtitle": { "type": "string", "maxLength": 400 },
+        "summary": { "type": "string", "minLength": 5, "maxLength": 2000 },
+        "content": { "type": "string", "minLength": 10, "maxLength": 120000 },
+        "contentType": { "type": "string", "enum": ["news", "article", "research", "educational_note", "government_notification", "historical_document", "report", "editorial", "opinion", "scientific_discovery", "statistical_info", "pdf_document", "image_gallery", "video_content", "special_collection"] },
+        "originalSource": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "originalSourceUrl": { "type": "string", "maxLength": 1000 },
+        "canonicalUrl": { "type": "string", "maxLength": 1000 },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "authorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "categoryId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "subcategoryId": { "type": "string", "maxLength": 128 },
+        "tags": { "type": "array", "description": "Up to 20 tags" },
+        "topics": { "type": "array", "description": "Up to 15 topic labels" },
+        "country": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "language": { "type": "string", "minLength": 2, "maxLength": 16 },
+        "featuredImage": { "type": "string", "maxLength": 1000 },
+        "attachments": { "type": "array", "description": "Up to 15 structured attachments" },
+        "publishedAt": { "type": "string", "format": "date-time" },
+        "collectedAt": { "type": "string", "format": "date-time" },
+        "scheduledAt": { "type": "string", "maxLength": 64 },
+        "collectionMethod": { "type": "string", "enum": ["manual", "rss", "api", "government_feed", "research_feed"] },
+        "copyrightPermissionStatus": { "type": "string", "enum": ["original", "full_licensed", "excerpt_and_link", "public_domain", "cc_licensed"] },
+        "editorialStatus": { "type": "string", "enum": ["draft", "pending_review", "needs_correction", "scheduled", "published", "rejected", "archived"] },
+        "factCheckStatus": { "type": "string", "enum": ["verified", "partially_verified", "unverified", "disputed", "false", "under_review"] },
+        "isBreaking": { "type": "boolean" },
+        "isFeatured": { "type": "boolean" },
+        "isSampleData": { "type": "boolean" },
+        "viewCount": { "type": "number" },
+        "aiSummary": { "type": "string", "maxLength": 2000 },
+        "aiKeywords": { "type": "array", "description": "Up to 20 AI extracted keywords" },
+        "aiProcessed": { "type": "boolean" },
+        "sourceId": { "type": "string", "maxLength": 128 },
+        "seoTitle": { "type": "string", "maxLength": 160 },
+        "seoDescription": { "type": "string", "maxLength": 320 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "slug", "summary", "content", "contentType", "originalSource", "authorName", "authorUid", "categoryId", "country", "language", "collectionMethod", "copyrightPermissionStatus", "editorialStatus", "factCheckStatus", "createdAt", "updatedAt"]
+    },
+    "ArticleVersion": {
+      "title": "ArticleVersion",
+      "description": "Revision snapshot for editorial history and auditability.",
+      "type": "object",
+      "properties": {
+        "articleId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "versionNumber": { "type": "number" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "summary": { "type": "string", "maxLength": 2000 },
+        "content": { "type": "string", "maxLength": 120000 },
+        "editorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "editorName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "changeNote": { "type": "string", "maxLength": 400 },
+        "editorialStatus": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["articleId", "versionNumber", "title", "editorUid", "editorName", "createdAt"]
+    },
+    "Publisher": {
+      "title": "Publisher",
+      "description": "Verified news organization, journal, or government institution.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "slug": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[a-z0-9\\-]+$" },
+        "websiteUrl": { "type": "string", "maxLength": 500 },
+        "country": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "language": { "type": "string", "minLength": 2, "maxLength": 16 },
+        "publisherType": { "type": "string", "maxLength": 60 },
+        "trustClassification": { "type": "string", "enum": ["official_government", "peer_reviewed", "major_newsroom", "verified_independent", "standard"] },
+        "description": { "type": "string", "maxLength": 800 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "slug", "websiteUrl", "country", "language", "trustClassification", "createdAt", "updatedAt"]
+    },
+    "Source": {
+      "title": "Source",
+      "description": "Automatic collection source (RSS feed, authorized API, government or research feed).",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "websiteUrl": { "type": "string", "maxLength": 500 },
+        "sourceType": { "type": "string", "enum": ["rss_feed", "news_publisher", "newspaper_website", "news_channel", "government_portal", "educational_institution", "research_journal", "press_release", "authorized_api", "custom_feed"] },
+        "country": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "language": { "type": "string", "minLength": 2, "maxLength": 16 },
+        "rssFeedUrl": { "type": "string", "maxLength": 1000 },
+        "apiEndpoint": { "type": "string", "maxLength": 1000 },
+        "authMode": { "type": "string", "enum": ["none", "server_env_header", "server_env_query"] },
+        "fetchIntervalMinutes": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "paused", "error"] },
+        "trustClassification": { "type": "string", "enum": ["tier_1_official", "tier_1_journal", "tier_2_major_media", "tier_3_verified", "unclassified"] },
+        "contentPermission": { "type": "string", "enum": ["excerpt_and_link", "full_authorized", "public_domain", "cc_by"] },
+        "autoPublishEligible": { "type": "boolean" },
+        "defaultCategoryId": { "type": "string", "maxLength": 128 },
+        "lastFetchTime": { "type": "string", "maxLength": 64 },
+        "nextFetchTime": { "type": "string", "maxLength": 64 },
+        "errorStatus": { "type": "string", "maxLength": 500 },
+        "totalImported": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "websiteUrl", "sourceType", "country", "language", "fetchIntervalMinutes", "status", "trustClassification", "contentPermission", "autoPublishEligible", "createdAt", "updatedAt"]
+    },
+    "IngestionLog": {
+      "title": "IngestionLog",
+      "description": "Audit log of automatic RSS/API collection runs and duplicate stats.",
+      "type": "object",
+      "properties": {
+        "sourceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sourceName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "triggeredByUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "type": "string", "enum": ["success", "partial", "failed"] },
+        "itemsFetched": { "type": "number" },
+        "itemsImported": { "type": "number" },
+        "duplicatesSkipped": { "type": "number" },
+        "errorMessage": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sourceId", "sourceName", "triggeredByUid", "status", "itemsFetched", "itemsImported", "duplicatesSkipped", "createdAt"]
+    },
+    "FactCheck": {
+      "title": "FactCheck",
+      "description": "Structured transparent fact-check record with evidence and methodology.",
+      "type": "object",
+      "properties": {
+        "claim": { "type": "string", "minLength": 5, "maxLength": 600 },
+        "status": { "type": "string", "enum": ["verified", "partially_verified", "unverified", "disputed", "false", "under_review"] },
+        "evidence": { "type": "string", "minLength": 5, "maxLength": 4000 },
+        "explanation": { "type": "string", "minLength": 5, "maxLength": 4000 },
+        "methodology": { "type": "string", "maxLength": 1000 },
+        "references": { "type": "array", "description": "Up to 20 reference source links/citations" },
+        "reviewerName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "reviewerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "articleId": { "type": "string", "maxLength": 128 },
+        "category": { "type": "string", "maxLength": 100 },
+        "isSampleData": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["claim", "status", "evidence", "explanation", "reviewerName", "reviewerUid", "createdAt", "updatedAt"]
+    },
+    "Timeline": {
+      "title": "Timeline",
+      "description": "Chronological timeline for major events and evolving topics.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 3, "maxLength": 200 },
+        "slug": { "type": "string", "minLength": 2, "maxLength": 160, "pattern": "^[a-z0-9\\-]+$" },
+        "topic": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "summary": { "type": "string", "maxLength": 1000 },
+        "events": { "type": "array", "description": "Up to 50 chronological milestones" },
+        "isSampleData": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "slug", "topic", "summary", "events", "createdAt", "updatedAt"]
+    },
+    "Bookmark": {
+      "title": "Bookmark",
+      "description": "User saved article bookmark.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "articleId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "articleTitle": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "articleSlug": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "articleId", "articleTitle", "articleSlug", "createdAt"]
+    },
+    "ReadingHistory": {
+      "title": "ReadingHistory",
+      "description": "User article reading history and scroll progress.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "articleId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "articleTitle": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "articleSlug": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "progressPercent": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "articleId", "articleTitle", "articleSlug", "progressPercent", "createdAt", "updatedAt"]
+    },
+    "ReadingList": {
+      "title": "ReadingList",
+      "description": "User-curated personal reading list.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 400 },
+        "articleIds": { "type": "array", "description": "Up to 50 article IDs" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "articleIds", "createdAt", "updatedAt"]
+    },
+    "SavedSearch": {
+      "title": "SavedSearch",
+      "description": "User saved search query and active filters.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "query": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 100 },
+        "language": { "type": "string", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "query", "createdAt"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "Reader discussion comment on a published article.",
+      "type": "object",
+      "properties": {
+        "articleId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "authorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "body": { "type": "string", "minLength": 2, "maxLength": 2000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["articleId", "authorUid", "authorName", "body", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Append-only audit trail for administrative and editorial actions.",
+      "type": "object",
+      "properties": {
+        "actorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "actorEmail": { "type": "string", "maxLength": 254 },
+        "actorRole": { "type": "string", "maxLength": 60 },
+        "action": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "targetType": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "targetId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorUid", "actorEmail", "actorRole", "action", "targetType", "targetId", "createdAt"]
+    },
+    "SiteSetting": {
+      "title": "SiteSetting",
+      "description": "Global platform configuration, editorial workflow policy, and SEO settings.",
+      "type": "object",
+      "properties": {
+        "siteName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "tagline": { "type": "string", "maxLength": 240 },
+        "defaultRequireApproval": { "type": "boolean" },
+        "enabledLanguages": { "type": "array", "description": "Up to 20 enabled language codes" },
+        "breakingTickerEnabled": { "type": "boolean" },
+        "seoDefaultTitle": { "type": "string", "maxLength": 160 },
+        "seoDefaultDescription": { "type": "string", "maxLength": 320 },
+        "aiProviderName": { "type": "string", "maxLength": 60 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["siteName", "defaultRequireApproval", "enabledLanguages", "breakingTickerEnabled", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profiles isolated to owner and admin."
+    },
+    "/users/{userId}/bookmarks/{bookmarkId}": {
+      "schema": { "$ref": "#/entities/Bookmark" },
+      "description": "User saved bookmarks."
+    },
+    "/users/{userId}/reading_history/{historyId}": {
+      "schema": { "$ref": "#/entities/ReadingHistory" },
+      "description": "User reading history and scroll progress."
+    },
+    "/users/{userId}/reading_lists/{listId}": {
+      "schema": { "$ref": "#/entities/ReadingList" },
+      "description": "User personal reading lists."
+    },
+    "/users/{userId}/saved_searches/{searchId}": {
+      "schema": { "$ref": "#/entities/SavedSearch" },
+      "description": "User saved search filters."
+    },
+    "/admin_roles/{userId}": {
+      "schema": { "$ref": "#/entities/AdminRole" },
+      "description": "Role-based access control registry."
+    },
+    "/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Dynamic database-driven categories and nested subcategories."
+    },
+    "/articles/{articleId}": {
+      "schema": { "$ref": "#/entities/Article" },
+      "description": "Central content database for manual and auto-collected items."
+    },
+    "/articles/{articleId}/versions/{versionId}": {
+      "schema": { "$ref": "#/entities/ArticleVersion" },
+      "description": "Immutable editorial revision history for each article."
+    },
+    "/articles/{articleId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/Comment" },
+      "description": "Reader discussion comments on published articles."
+    },
+    "/publishers/{publisherId}": {
+      "schema": { "$ref": "#/entities/Publisher" },
+      "description": "Global publisher directory."
+    },
+    "/sources/{sourceId}": {
+      "schema": { "$ref": "#/entities/Source" },
+      "description": "Automatic collection source configurations (RSS, API, Gov, Research)."
+    },
+    "/ingestion_logs/{logId}": {
+      "schema": { "$ref": "#/entities/IngestionLog" },
+      "description": "Collection history and import statistics."
+    },
+    "/fact_checks/{factCheckId}": {
+      "schema": { "$ref": "#/entities/FactCheck" },
+      "description": "Transparent fact-check evaluations and evidence."
+    },
+    "/timelines/{timelineId}": {
+      "schema": { "$ref": "#/entities/Timeline" },
+      "description": "Chronological event and topic timelines."
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Append-only administrative audit logs."
+    },
+    "/site_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/SiteSetting" },
+      "description": "Platform-wide public and editorial workflow settings."
+    }
+  }
+}

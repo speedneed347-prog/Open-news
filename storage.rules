@@ -1,0 +1,56 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isVerified() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isStaff() {
+      return isVerified() && (
+        request.auth.token.email == 'manojitmi72@gmail.com' ||
+        firestore.exists(/databases/(default)/documents/admin_roles/$(request.auth.uid))
+      );
+    }
+
+    function isValidImage() {
+      return request.resource.size < 10 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/(jpeg|png|webp|avif)');
+    }
+
+    function isValidDocument() {
+      return request.resource.size < 25 * 1024 * 1024 &&
+        request.resource.contentType in [
+          'application/pdf',
+          'text/csv',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        ];
+    }
+
+    // Publicly readable published media; staff-only validated uploads
+    match /articles/{articleId}/images/{fileName} {
+      allow read: if true;
+      allow write: if isStaff() && isValidImage();
+    }
+
+    match /articles/{articleId}/documents/{fileName} {
+      allow read: if true;
+      allow write: if isStaff() && isValidDocument();
+    }
+
+    match /categories/{categoryId}/{fileName} {
+      allow read: if true;
+      allow write: if isStaff() && isValidImage();
+    }
+
+    // User avatar uploads restricted to owner
+    match /users/{userId}/avatar/{fileName} {
+      allow read: if true;
+      allow write: if isVerified() && request.auth.uid == userId && isValidImage() && request.resource.size < 2 * 1024 * 1024;
+    }
+
+    // Default deny everything else
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
